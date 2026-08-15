@@ -1,0 +1,163 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- SEO Meta Tags -->
+    <title>{% block title %}{{ config.SITE_NAME }} - Crypto News, Market Analysis & Blockchain Updates{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}{{ config.SITE_DESCRIPTION }}{% endblock %}">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="{{ config.SITE_NAME }}">
+    <link rel="canonical" href="{{ request.url }}">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+    <meta property="og:title" content="{% block og_title %}{{ config.SITE_NAME }}{% endblock %}">
+    <meta property="og:description" content="{% block og_description %}{{ config.SITE_DESCRIPTION }}{% endblock %}">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:site_name" content="{{ config.SITE_NAME }}">
+    <meta property="og:image" content="{% block og_image %}{{ config.SITE_URL }}/static/images/og-default.jpg{% endblock %}">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{% block twitter_title %}{{ config.SITE_NAME }}{% endblock %}">
+    <meta name="twitter:description" content="{% block twitter_description %}{{ config.SITE_DESCRIPTION }}{% endblock %}">
+
+    <!-- JSON-LD Schema -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "NewsMediaOrganization",
+        "name": "{{ config.SITE_NAME }}",
+        "url": "{{ config.SITE_URL }}",
+        "description": "{{ config.SITE_DESCRIPTION }}"
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- Google AdSense -->
+    {% if config.GOOGLE_ADSENSE_ID %}
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={{ config.GOOGLE_ADSENSE_ID }}" crossorigin="anonymous"></script>
+    {% endif %}
+
+    <!-- Google Analytics -->
+    {% if config.GOOGLE_ANALYTICS_ID %}
+    <script async src="https://www.googletagmanager.com/gtag/js?id={{ config.GOOGLE_ANALYTICS_ID }}"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', '{{ config.GOOGLE_ANALYTICS_ID }}');
+    </script>
+    {% endif %}
+</head>
+<body>
+    <!-- Price Ticker Bar -->
+    <div class="ticker-bar" id="tickerBar">
+        <div class="ticker-content" id="tickerContent">
+            Loading market data...
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <header class="header">
+        <nav class="nav-container">
+            <a href="/" class="logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">CryptoNest<span class="logo-accent">News</span></span>
+            </a>
+
+            <div class="nav-links" id="navLinks">
+                <a href="/" class="nav-link">Home</a>
+                <a href="/category/market" class="nav-link">Markets</a>
+                <a href="/category/bitcoin" class="nav-link">Bitcoin</a>
+                <a href="/category/ethereum" class="nav-link">Ethereum</a>
+                <a href="/category/altcoins" class="nav-link">Altcoins</a>
+                <a href="/category/defi" class="nav-link">DeFi</a>
+                <a href="/category/nft" class="nav-link">NFT</a>
+                <a href="/category/web3" class="nav-link">Web3</a>
+                <a href="/category/regulation" class="nav-link">Regulation</a>
+                <a href="/market" class="nav-link nav-highlight">Live</a>
+            </div>
+
+            <div class="nav-right">
+                <form action="/search" method="GET" class="search-form">
+                    <input type="text" name="q" placeholder="Search..." class="search-input">
+                    <button type="submit" class="search-btn"><i class="fas fa-search"></i></button>
+                </form>
+                <button class="mobile-menu-btn" id="mobileMenuBtn">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        {% if error %}
+        <div class="error-page">
+            <h1>{{ error }}</h1>
+            <a href="/" class="btn">Go Home</a>
+        </div>
+        {% else %}
+        {% block content %}{% endblock %}
+        {% endif %}
+    </main>
+
+    <!-- Newsletter -->
+    <section class="newsletter-section">
+        <div class="container">
+            <h2>📧 Stay Updated</h2>
+            <p>Get the latest crypto news delivered to your inbox daily.</p>
+            <form action="/subscribe" method="POST" class="newsletter-form">
+                <input type="email" name="email" placeholder="Enter your email" required>
+                <button type="submit" class="btn btn-primary">Subscribe</button>
+            </form>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-col">
+                    <h3>⚡ CryptoNestNews</h3>
+                    <p>Your trusted source for cryptocurrency news, market analysis, and blockchain technology updates.</p>
+                </div>
+                <div class="footer-col">
+                    <h4>Categories</h4>
+                    <a href="/category/bitcoin">Bitcoin</a>
+                    <a href="/category/ethereum">Ethereum</a>
+                    <a href="/category/defi">DeFi</a>
+                    <a href="/category/nft">NFT</a>
+                    <a href="/category/web3">Web3</a>
+                </div>
+                <div class="footer-col">
+                    <h4>Resources</h4>
+                    <a href="/market">Live Prices</a>
+                </div>
+                <div class="footer-col">
+                    <h4>Legal</h4>
+                    <a href="/about">About Us</a>
+                    <a href="/privacy">Privacy Policy</a>
+                    <a href="/disclaimer">Disclaimer</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; <script>document.write(new Date().getFullYear())</script> {{ config.SITE_NAME }}. All rights reserved.</p>
+                <p class="footer-disclaimer">Cryptocurrency investments are subject to high market risk. This website does not provide financial advice.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

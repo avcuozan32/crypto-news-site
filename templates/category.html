@@ -1,0 +1,44 @@
+﻿{% extends 'base.html' %}
+{% block title %}{{ category_name }} | {{ config.SITE_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="page-title">{{ category_name }}</h1>
+
+    {% if articles and articles.items %}
+    <div class="articles-grid">
+        {% for article in articles.items %}
+        <article class="article-card">
+            <a href="/article/{{ article.slug }}" class="article-image-link">
+                <div class="article-image"
+                     style="background-image: url('{{ article.image_url or '/static/images/placeholder.jpg' }}')">
+                    <span class="category-badge {{ article.category }}">{{ article.category }}</span>
+                </div>
+            </a>
+            <div class="article-body">
+                <h3><a href="/article/{{ article.slug }}">{{ article.title }}</a></h3>
+                <p class="article-summary">{{ article.summary[:150] }}...</p>
+                <div class="article-meta">
+                    <span><i class="far fa-clock"></i> {{ article.created_at|time_ago }}</span>
+                    <span><i class="far fa-eye"></i> {{ article.views }}</span>
+                </div>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination">
+        {% if articles.has_prev %}
+        <a href="?page={{ articles.prev_num }}" class="btn btn-outline">&laquo; Previous</a>
+        {% endif %}
+        <span class="page-info">Page {{ articles.page }} of {{ articles.pages }}</span>
+        {% if articles.has_next %}
+        <a href="?page={{ articles.next_num }}" class="btn btn-outline">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% else %}
+    <p class="no-results">No articles found.</p>
+    {% endif %}
+</div>
+{% endblock %}

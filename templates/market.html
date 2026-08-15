@@ -1,0 +1,76 @@
+﻿{% extends 'base.html' %}
+{% block title %}Live Cryptocurrency Prices | {{ config.SITE_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="page-title">📊 Live Cryptocurrency Prices</h1>
+
+    <!-- Market Summary -->
+    {% if summary %}
+    <div class="market-summary-grid">
+        <div class="summary-card">
+            <span class="summary-label">Total Market Cap</span>
+            <span class="summary-value">{{ summary.total_market_cap|format_number }}</span>
+            <span class="summary-change {% if summary.market_cap_change_24h >= 0 %}positive{% else %}negative{% endif %}">
+                {{ '{:+.2f}'.format(summary.market_cap_change_24h) }}% (24h)
+            </span>
+        </div>
+        <div class="summary-card">
+            <span class="summary-label">24h Volume</span>
+            <span class="summary-value">{{ summary.total_volume|format_number }}</span>
+        </div>
+        <div class="summary-card">
+            <span class="summary-label">BTC Dominance</span>
+            <span class="summary-value">{{ '{:.1f}'.format(summary.btc_dominance) }}%</span>
+        </div>
+        <div class="summary-card">
+            <span class="summary-label">Active Cryptos</span>
+            <span class="summary-value">{{ '{:,}'.format(summary.active_cryptocurrencies) }}</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Price Table -->
+    <div class="price-table-container">
+        <table class="price-table-full">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Coin</th>
+                    <th>Price</th>
+                    <th>24h Change</th>
+                    <th>Market Cap</th>
+                    <th>Volume (24h)</th>
+                    <th>Supply</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for coin in coins %}
+                <tr>
+                    <td>{{ coin.market_cap_rank }}</td>
+                    <td class="coin-cell">
+                        <img src="{{ coin.image_url }}" alt="{{ coin.name }}" width="28" height="28" loading="lazy">
+                        <div>
+                            <strong>{{ coin.name }}</strong>
+                            <span class="coin-symbol">{{ coin.symbol }}</span>
+                        </div>
+                    </td>
+                    <td><strong>${{ '{:,.2f}'.format(coin.current_price or 0) }}</strong></td>
+                    <td class="{% if (coin.price_change_percentage_24h or 0) >= 0 %}positive{% else %}negative{% endif %}">
+                        {{ '{:+.2f}'.format(coin.price_change_percentage_24h or 0) }}%
+                    </td>
+                    <td>{{ (coin.market_cap or 0)|format_number }}</td>
+                    <td>{{ (coin.total_volume or 0)|format_number }}</td>
+                    <td>{{ '{:,.0f}'.format(coin.circulating_supply or 0) }} {{ coin.symbol }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <p class="update-note">
+        <i class="fas fa-sync-alt"></i> Prices update every 5 minutes.
+        Last updated: {{ coins[0].last_updated.strftime('%H:%M UTC') if coins else 'N/A' }}
+    </p>
+</div>
+{% endblock %}

@@ -1,0 +1,34 @@
+﻿{% extends 'base.html' %}
+{% block title %}About Us | {{ config.SITE_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container page-content">
+    <h1>About {{ config.SITE_NAME }}</h1>
+
+    <p><strong>{{ config.SITE_NAME }}</strong> is an independent cryptocurrency news platform
+    dedicated to providing timely, accurate, and insightful coverage of the digital asset industry.</p>
+
+    <h2>Our Mission</h2>
+    <p>We believe in democratizing access to cryptocurrency information. Our mission is to help
+    both newcomers and experienced traders stay informed about the rapidly evolving world of
+    blockchain technology and digital assets.</p>
+
+    <h2>What We Cover</h2>
+    <ul>
+        <li>Breaking cryptocurrency news and market updates</li>
+        <li>In-depth analysis of Bitcoin, Ethereum, and altcoins</li>
+        <li>DeFi, NFT, and Web3 developments</li>
+        <li>Regulatory news and policy changes</li>
+        <li>Blockchain technology innovations</li>
+        <li>Security alerts and scam warnings</li>
+    </ul>
+
+    <h2>Editorial Policy</h2>
+    <p>We are committed to factual, unbiased reporting. Our editorial team verifies information
+    from multiple sources before publication. Sponsored content is always clearly labeled.</p>
+
+    <h2>Contact</h2>
+    <p>Email: contact@cryptonestnews.com</p>
+    <p>Twitter: @CryptoNestNews</p>
+</div>
+{% endblock %}

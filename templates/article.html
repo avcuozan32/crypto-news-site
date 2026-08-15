@@ -1,0 +1,133 @@
+﻿{% extends 'base.html' %}
+
+{% block title %}{{ article.seo_title or article.title }} | {{ config.SITE_NAME }}{% endblock %}
+{% block meta_description %}{{ article.seo_description or article.summary }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_title %}{{ article.title }}{% endblock %}
+{% block og_description %}{{ article.summary }}{% endblock %}
+{% block og_image %}{{ article.image_url or config.SITE_URL + '/static/images/og-default.jpg' }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Article Schema -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        "headline": "{{ article.title }}",
+        "description": "{{ article.summary }}",
+        "image": "{{ article.image_url }}",
+        "datePublished": "{{ article.created_at.isoformat() }}",
+        "dateModified": "{{ article.updated_at.isoformat() }}",
+        "author": {
+            "@type": "Person",
+            "name": "{{ article.author }}"
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "{{ config.SITE_NAME }}",
+            "url": "{{ config.SITE_URL }}"
+        }
+    }
+    </script>
+
+    <div class="article-layout">
+        <article class="article-full">
+            <!-- Breadcrumb -->
+            <nav class="breadcrumb">
+                <a href="/">Home</a> &rsaquo;
+                <a href="/category/{{ article.category }}">{{ article.category|title }}</a> &rsaquo;
+                <span>{{ article.title[:50] }}...</span>
+            </nav>
+
+            <!-- Header -->
+            <header class="article-header">
+                <span class="category-badge {{ article.category }}">{{ article.category }}</span>
+                {% if article.is_breaking %}
+                <span class="breaking-badge">🔴 Breaking</span>
+                {% endif %}
+                <h1>{{ article.title }}</h1>
+                <div class="article-meta-full">
+                    <span><i class="far fa-user"></i> {{ article.author }}</span>
+                    <span><i class="far fa-clock"></i> {{ article.created_at.strftime('%B %d, %Y at %H:%M UTC') }}</span>
+                    <span><i class="far fa-eye"></i> {{ article.views }} views</span>
+                </div>
+            </header>
+
+            <!-- Featured Image -->
+            {% if article.image_url %}
+            <div class="article-featured-image">
+                <img src="{{ article.image_url }}" alt="{{ article.title }}" loading="lazy">
+            </div>
+            {% endif %}
+
+            <!-- Ad before content -->
+            <div class="ad-container">
+                <div class="ad-placeholder">Advertisement</div>
+            </div>
+
+            <!-- Content -->
+            <div class="article-content-body">
+                {{ article.content|safe }}
+            </div>
+
+            <!-- Tags -->
+            {% if article.get_tags() %}
+            <div class="article-tags">
+                <strong>Tags:</strong>
+                {% for tag in article.get_tags() %}
+                <a href="/search?q={{ tag }}" class="tag">{{ tag }}</a>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Share -->
+            <div class="share-buttons">
+                <strong>Share:</strong>
+                <a href="https://twitter.com/intent/tweet?text={{ article.title }}&url={{ config.SITE_URL }}/article/{{ article.slug }}" target="_blank" class="share-btn twitter">
+                    <i class="fab fa-x-twitter"></i> Twitter
+                </a>
+                <a href="https://t.me/share/url?url={{ config.SITE_URL }}/article/{{ article.slug }}&text={{ article.title }}" target="_blank" class="share-btn telegram">
+                    <i class="fab fa-telegram"></i> Telegram
+                </a>
+                <a href="https://www.reddit.com/submit?url={{ config.SITE_URL }}/article/{{ article.slug }}&title={{ article.title }}" target="_blank" class="share-btn reddit">
+                    <i class="fab fa-reddit"></i> Reddit
+                </a>
+            </div>
+
+            <!-- Ad after content -->
+            <div class="ad-container">
+                <div class="ad-placeholder">Advertisement</div>
+            </div>
+
+            <!-- Source -->
+            {% if article.source %}
+            <div class="article-source">
+                <p>Source: <a href="{{ article.source_url }}" target="_blank" rel="noopener nofollow">{{ article.source }}</a></p>
+            </div>
+            {% endif %}
+        </article>
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <!-- Related Articles -->
+            <div class="sidebar-widget">
+                <h3>Related Articles</h3>
+                {% for rel in related %}
+                <div class="related-article">
+                    <a href="/article/{{ rel.slug }}">
+                        <h4>{{ rel.title }}</h4>
+                        <span class="time">{{ rel.created_at|time_ago }}</span>
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Ad -->
+            <div class="sidebar-widget ad-container">
+                <div class="ad-placeholder">Advertisement</div>
+            </div>
+        </aside>
+    </div>
+</div>
+{% endblock %}

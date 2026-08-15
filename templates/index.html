@@ -1,0 +1,139 @@
+﻿{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+
+    <!-- Breaking News Bar -->
+    {% if breaking %}
+    <div class="breaking-news">
+        <span class="breaking-label">🔴 BREAKING</span>
+        <div class="breaking-scroll">
+            {% for news in breaking %}
+            <a href="/article/{{ news.slug }}">{{ news.title }}</a>
+            {% if not loop.last %}<span class="breaking-sep">|</span>{% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Featured Articles -->
+    {% if featured %}
+    <section class="featured-section">
+        <div class="featured-grid">
+            {% for article in featured %}
+            <div class="featured-card {% if loop.first %}featured-main{% endif %}">
+                <div class="featured-image"
+                     style="background-image: url('{{ article.image_url or '/static/images/placeholder.jpg' }}')">
+                    <div class="featured-overlay">
+                        <span class="category-badge">{{ article.category }}</span>
+                        <h2><a href="/article/{{ article.slug }}">{{ article.title }}</a></h2>
+                        <div class="article-meta">
+                            <span><i class="far fa-clock"></i> {{ article.created_at|time_ago }}</span>
+                            <span><i class="far fa-user"></i> {{ article.author }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Ad Space 1 -->
+    <div class="ad-container">
+        <!-- AdSense kodu buraya gelecek -->
+        <div class="ad-placeholder">Advertisement</div>
+    </div>
+
+    <div class="content-grid">
+        <!-- Main Content -->
+        <div class="main-column">
+            <h2 class="section-title">📰 Latest News</h2>
+
+            <div class="articles-grid">
+                {% for article in articles.items %}
+                <article class="article-card">
+                    <a href="/article/{{ article.slug }}" class="article-image-link">
+                        <div class="article-image"
+                             style="background-image: url('{{ article.image_url or '/static/images/placeholder.jpg' }}')">
+                            <span class="category-badge {{ article.category }}">{{ article.category }}</span>
+                        </div>
+                    </a>
+                    <div class="article-body">
+                        <h3><a href="/article/{{ article.slug }}">{{ article.title }}</a></h3>
+                        <p class="article-summary">{{ article.summary[:120] }}...</p>
+                        <div class="article-meta">
+                            <span><i class="far fa-clock"></i> {{ article.created_at|time_ago }}</span>
+                            <span><i class="far fa-eye"></i> {{ article.views }}</span>
+                        </div>
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination">
+                {% if articles.has_prev %}
+                <a href="?page={{ articles.prev_num }}" class="btn btn-outline">&laquo; Previous</a>
+                {% endif %}
+
+                <span class="page-info">Page {{ articles.page }} of {{ articles.pages }}</span>
+
+                {% if articles.has_next %}
+                <a href="?page={{ articles.next_num }}" class="btn btn-outline">Next &raquo;</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <!-- Market Widget -->
+            <div class="sidebar-widget">
+                <h3>📊 Market Overview</h3>
+                <div class="market-widget">
+                    {% for coin in coins[:10] %}
+                    <div class="coin-row">
+                        <div class="coin-info">
+                            <img src="{{ coin.image_url }}" alt="{{ coin.name }}" class="coin-icon" width="24" height="24" loading="lazy">
+                            <div>
+                                <span class="coin-name">{{ coin.symbol }}</span>
+                                <span class="coin-fullname">{{ coin.name }}</span>
+                            </div>
+                        </div>
+                        <div class="coin-price-info">
+                            <span class="coin-price">${{ '{:,.2f}'.format(coin.current_price or 0) }}</span>
+                            <span class="coin-change {% if (coin.price_change_percentage_24h or 0) >= 0 %}positive{% else %}negative{% endif %}">
+                                {{ '{:+.1f}'.format(coin.price_change_percentage_24h or 0) }}%
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <a href="/market" class="btn btn-outline btn-block">View All Prices →</a>
+            </div>
+
+            <!-- Ad Space 2 -->
+            <div class="sidebar-widget ad-container">
+                <div class="ad-placeholder">Advertisement</div>
+            </div>
+
+            <!-- Trending Tags -->
+            <div class="sidebar-widget">
+                <h3>🔥 Trending Topics</h3>
+                <div class="tag-cloud">
+                    <a href="/search?q=bitcoin" class="tag">Bitcoin</a>
+                    <a href="/search?q=ethereum" class="tag">Ethereum</a>
+                    <a href="/search?q=solana" class="tag">Solana</a>
+                    <a href="/search?q=defi" class="tag">DeFi</a>
+                    <a href="/search?q=nft" class="tag">NFT</a>
+                    <a href="/search?q=etf" class="tag">ETF</a>
+                    <a href="/search?q=halving" class="tag">Halving</a>
+                    <a href="/search?q=airdrop" class="tag">Airdrop</a>
+                    <a href="/search?q=regulation" class="tag">Regulation</a>
+                    <a href="/search?q=whale" class="tag">Whale Alert</a>
+                </div>
+            </div>
+        </aside>
+    </div>
+</div>
+{% endblock %}
