@@ -31,11 +31,15 @@ class AutoNewsCollector:
         """RSS entry'den görsel URL'si çıkar"""
         # media:content
         if hasattr(entry, 'media_content') and entry.media_content:
-            return entry.media_content[0].get('url', '')
+            url = entry.media_content[0].get('url', '')
+            if url:
+                return url
 
         # media:thumbnail
         if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
-            return entry.media_thumbnail[0].get('url', '')
+            url = entry.media_thumbnail[0].get('url', '')
+            if url:
+                return url
 
         # enclosure
         if hasattr(entry, 'enclosures') and entry.enclosures:
@@ -51,7 +55,69 @@ class AutoNewsCollector:
             if img and img.get('src'):
                 return img['src']
 
+        # content:encoded içinden dene
+        if hasattr(entry, 'content') and entry.content:
+            for c in entry.content:
+                soup = BeautifulSoup(c.get('value', ''), 'html.parser')
+                img = soup.find('img')
+                if img and img.get('src'):
+                    return img['src']
+
         return ''
+
+    def _get_fallback_image(self, category, title):
+        """Resim yoksa kategori bazlı varsayılan resim"""
+        import random
+        fallback_images = {
+            'bitcoin': [
+                'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=800',
+                'https://images.unsplash.com/photo-1543699565-003b8adda5fc?w=800',
+                'https://images.unsplash.com/photo-1621761191319-c6fb62004040?w=800',
+            ],
+            'ethereum': [
+                'https://images.unsplash.com/photo-1622790698141-94e30457ef12?w=800',
+                'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800',
+            ],
+            'defi': [
+                'https://images.unsplash.com/photo-1620321023374-d1a68fbc720d?w=800',
+                'https://images.unsplash.com/photo-1642104704074-907c0698cbd9?w=800',
+            ],
+            'nft': [
+                'https://images.unsplash.com/photo-1646153742982-7b80f4b4a3d0?w=800',
+                'https://images.unsplash.com/photo-1637858868799-7f26a0640eb6?w=800',
+            ],
+            'market': [
+                'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800',
+                'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800',
+            ],
+            'web3': [
+                'https://images.unsplash.com/photo-1639322537228-f710d846310a?w=800',
+                'https://images.unsplash.com/photo-1644143379190-08a5f055de1d?w=800',
+            ],
+            'regulation': [
+                'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=800',
+                'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=800',
+            ],
+            'security': [
+                'https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=800',
+                'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
+            ],
+            'altcoins': [
+                'https://images.unsplash.com/photo-1621416894569-0f39ed31d247?w=800',
+                'https://images.unsplash.com/photo-1629339942248-45d4b10c8c2f?w=800',
+            ],
+            'exchange': [
+                'https://images.unsplash.com/photo-1560221328-12fe60f83ab8?w=800',
+                'https://images.unsplash.com/photo-1601597111158-2fceff292cdc?w=800',
+            ],
+            'news': [
+                'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800',
+                'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=800',
+            ],
+        }
+
+        category_images = fallback_images.get(category, fallback_images['news'])
+        return random.choice(category_images)
 
     def _categorize(self, title, content):
         """Haberi otomatik kategorize et"""
@@ -173,6 +239,8 @@ class AutoNewsCollector:
 
                         content = self._rewrite_content(title, summary, source_name)
                         image_url = self._extract_image(entry)
+                        if not image_url:
+                            image_url = self._get_fallback_image(category, title)
                         category = self._categorize(title, summary)
                         tags = self._extract_tags(title, summary)
 
