@@ -257,6 +257,11 @@ def time_ago(dt):
     else:
         return dt.strftime('%b %d, %Y')
 
+    # ========== GOOGLE VERIFICATION ==========
+@app.route('/google04f0ed8bce0d36b0.html')
+def google_verify():
+    return 'google-site-verification: google04f0ed8bce0d36b0.html'
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
