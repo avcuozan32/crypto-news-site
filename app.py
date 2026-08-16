@@ -1,10 +1,15 @@
-﻿from flask import Flask, render_template, request, jsonify, Response, redirect, url_for
+﻿import os
+from datetime import datetime
+
+from flask import (Flask, render_template, request, jsonify,
+                   Response, redirect, url_for)
 from flask_caching import Cache
-from database import db, init_db, Article, CoinPrice, NewsletterSubscriber
+
 from config import Config
-from scheduler import setup_scheduler
+from database import db, init_db, Article, CoinPrice, NewsletterSubscriber
 from price_tracker import PriceTracker
-import os
+from rss_generator import RSSGenerator
+from sitemap_generator import SitemapGenerator
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -12,7 +17,21 @@ app.config.from_object(Config)
 init_db(app)
 cache = Cache(app)
 tracker = PriceTracker()
-scheduler = setup_scheduler(app)
+
+CATEGORY_NAMES = {
+    'news': 'Latest News',
+    'market': 'Market Analysis',
+    'bitcoin': 'Bitcoin',
+    'ethereum': 'Ethereum',
+    'altcoins': 'Altcoins',
+    'defi': 'DeFi',
+    'nft': 'NFT',
+    'web3': 'Web3 & GameFi',
+    'regulation': 'Regulation',
+    'security': 'Security',
+    'technology': 'Blockchain Tech',
+    'exchange': 'Exchanges',
+}
 
 
 # ==================== ANA SAYFALAR ====================
@@ -22,250 +41,249 @@ scheduler = setup_scheduler(app)
 def index():
     page = request.args.get('page', 1, type=int)
 
-    featured = Article.query.filter_by(
-        is_published=True, is_featured=True
-    ).order_by(Article.created_at.desc()).limit(3).all()
+    featured = (Article.query
+                .filter_by(is_published=True, is_featured=True)
+                .order_by(Article.created_at.desc()).limit(3).all())
 
-    breaking = Article.query.filter_by(
-        is_published=True, is_breaking=True
-    ).order_by(Article.created_at.desc()).limit(5).all()
+    if len(featured) < 3:
+        extra = (Article.query
+                 .filter(Article.is_published == True,
+                         Article.image_url != None,
+                         Article.image_url != '')
+                 .order_by(Article.created_at.desc())
+                 .limit(6).all())
+        ids = {a.id for a in featured}
+        for a in extra:
+            if a.id not in ids and len(featured) < 3:
+                featured.append(a)
+                ids.add(a.id)
 
-    articles = Article.query.filter_by(
-        is_published=True
-    ).order_by(Article.created_at.desc()).paginate(
-        page=page, per_page=Config.POSTS_PER_PAGE, error_out=False
-    )
+    breaking = (Article.query
+                .filter_by(is_published=True, is_breaking=True)
+                .order_by(Article.created_at.desc()).limit(5).all())
 
-    coins = CoinPrice.query.order_by(CoinPrice.market_cap_rank).limit(20).all()
+    articles = (Article.query
+                .filter_by(is_published=True)
+                .order_by(Article.created_at.desc())
+                .paginate(page=page, per_page=Config.POSTS_PER_PAGE,
+                          error_out=False))
+
+    coins = (CoinPrice.query
+             .order_by(CoinPrice.market_cap_rank).limit(20).all())
 
     return render_template('index.html',
-        featured=featured,
-        breaking=breaking,
-        articles=articles,
-        coins=coins,
-        page=page,
-    )
+                           featured=featured,
+                           breaking=breaking,
+                           articles=articles,
+                           coins=coins,
+                           page=page)
 
 
 @app.route('/article/<slug>')
-def article(slug):
-    article = Article.query.filter_by(slug=slug, is_published=True).first_or_404()
-    article.views += 1
-    db.session.commit()
+def article_detail(slug):
+    art = Article.query.filter_by(slug=slug, is_published=True).first_or_404()
+    art.views = (art.views or 0) + 1
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
-    related = Article.query.filter(
-        Article.category == article.category,
-        Article.id != article.id,
-        Article.is_published == True
-    ).order_by(Article.created_at.desc()).limit(4).all()
+    related = (Article.query
+               .filter(Article.category == art.category,
+                       Article.id != art.id,
+                       Article.is_published == True)
+               .order_by(Article.created_at.desc()).limit(4).all())
 
-    return render_template('article.html', article=article, related=related)
+    return render_template('article.html', article=art, related=related)
 
 
 @app.route('/category/<category>')
 @cache.cached(timeout=120)
-def category(category):
+def category_page(category):
     page = request.args.get('page', 1, type=int)
-    articles = Article.query.filter_by(
-        category=category, is_published=True
-    ).order_by(Article.created_at.desc()).paginate(
-        page=page, per_page=Config.POSTS_PER_PAGE, error_out=False
-    )
-
-    category_names = {
-        'news': 'Latest News',
-        'market': 'Market Analysis',
-        'bitcoin': 'Bitcoin',
-        'ethereum': 'Ethereum',
-        'altcoins': 'Altcoins',
-        'defi': 'DeFi',
-        'nft': 'NFT',
-        'web3': 'Web3 & GameFi',
-        'regulation': 'Regulation',
-        'security': 'Security',
-        'technology': 'Blockchain Tech',
-        'exchange': 'Exchanges',
-    }
+    articles = (Article.query
+                .filter_by(category=category, is_published=True)
+                .order_by(Article.created_at.desc())
+                .paginate(page=page, per_page=Config.POSTS_PER_PAGE,
+                          error_out=False))
 
     return render_template('category.html',
-        articles=articles,
-        category=category,
-        category_name=category_names.get(category, category.title()),
-        page=page,
-    )
+                           articles=articles,
+                           category=category,
+                           category_name=CATEGORY_NAMES.get(category, category.title()),
+                           page=page)
 
 
 @app.route('/market')
-@cache.cached(timeout=60)
-def market():
+@cache.cached(timeout=120)
+def market_page():
     coins = CoinPrice.query.order_by(CoinPrice.market_cap_rank).all()
-
-    total_market_cap = sum((c.market_cap or 0) for c in coins)
-    total_volume = sum((c.total_volume or 0) for c in coins)
-
-    btc = next((c for c in coins if c.symbol == 'BTC'), None)
-    eth = next((c for c in coins if c.symbol == 'ETH'), None)
-
-    btc_dominance = 0
-    eth_dominance = 0
-    if total_market_cap > 0:
-        if btc:
-            btc_dominance = (btc.market_cap or 0) / total_market_cap * 100
-        if eth:
-            eth_dominance = (eth.market_cap or 0) / total_market_cap * 100
-
-    changes = [c.price_change_percentage_24h for c in coins if c.price_change_percentage_24h is not None]
-    avg_change = sum(changes) / len(changes) if changes else 0
-
-    summary = {
-        'total_market_cap': total_market_cap,
-        'total_volume': total_volume,
-        'btc_dominance': btc_dominance,
-        'eth_dominance': eth_dominance,
-        'active_cryptocurrencies': len(coins),
-        'market_cap_change_24h': avg_change,
-    }
-
-    return render_template('market.html', coins=coins, summary=summary, trending=[])
+    summary = tracker.get_market_summary(app)
+    try:
+        trending = tracker.fetch_trending()
+    except Exception:
+        trending = []
+    return render_template('market.html', coins=coins,
+                           summary=summary, trending=trending)
 
 
 @app.route('/search')
-def search():
-    query = request.args.get('q', '')
+def search_page():
+    query = request.args.get('q', '').strip()
     page = request.args.get('page', 1, type=int)
 
+    articles = None
     if query:
-        articles = Article.query.filter(
-            Article.is_published == True,
-            (Article.title.contains(query) | Article.content.contains(query))
-        ).order_by(Article.created_at.desc()).paginate(
-            page=page, per_page=Config.POSTS_PER_PAGE, error_out=False
-        )
-    else:
-        articles = None
+        articles = (Article.query
+                    .filter(Article.is_published == True,
+                            (Article.title.contains(query) |
+                             Article.summary.contains(query) |
+                             Article.content.contains(query)))
+                    .order_by(Article.created_at.desc())
+                    .paginate(page=page, per_page=Config.POSTS_PER_PAGE,
+                              error_out=False))
 
     return render_template('category.html',
-        articles=articles,
-        category='search',
-        category_name=f'Search Results: "{query}"',
-        page=page,
-    )
+                           articles=articles,
+                           category='search',
+                           category_name=f'Search Results: "{query}"',
+                           page=page)
 
 
-# ==================== API ENDPOINTS ====================
+# ==================== API ====================
 
 @app.route('/api/prices')
 @cache.cached(timeout=60)
 def api_prices():
     coins = CoinPrice.query.order_by(CoinPrice.market_cap_rank).limit(50).all()
-    return jsonify([coin.to_dict() for coin in coins])
+    return jsonify([c.to_dict() for c in coins])
 
 
 @app.route('/api/ticker')
-@cache.cached(timeout=30)
+@cache.cached(timeout=45)
 def api_ticker():
-    coins = CoinPrice.query.order_by(CoinPrice.market_cap_rank).limit(10).all()
-    ticker_data = []
-    for coin in coins:
-        ticker_data.append({
-            'symbol': coin.symbol,
-            'price': coin.current_price,
-            'change': coin.price_change_percentage_24h,
-            'image': coin.image_url,
-        })
-    return jsonify(ticker_data)
+    coins = CoinPrice.query.order_by(CoinPrice.market_cap_rank).limit(12).all()
+    return jsonify([{
+        'symbol': c.symbol,
+        'price': c.current_price or 0,
+        'change': c.price_change_percentage_24h or 0,
+        'image': c.image_url or '',
+    } for c in coins])
+
+
+@app.route('/api/articles')
+@cache.cached(timeout=120)
+def api_articles():
+    limit = request.args.get('limit', 10, type=int)
+    category = request.args.get('category')
+    q = Article.query.filter_by(is_published=True)
+    if category:
+        q = q.filter_by(category=category)
+    items = q.order_by(Article.created_at.desc()).limit(limit).all()
+    return jsonify([a.to_dict() for a in items])
+
+
+@app.route('/api/market-summary')
+@cache.cached(timeout=120)
+def api_market_summary():
+    return jsonify(tracker.get_market_summary(app))
 
 
 # ==================== NEWSLETTER ====================
 
 @app.route('/subscribe', methods=['POST'])
 def subscribe():
-    email = request.form.get('email', '').strip()
-    if email:
-        existing = NewsletterSubscriber.query.filter_by(email=email).first()
-        if not existing:
-            sub = NewsletterSubscriber(email=email)
-            db.session.add(sub)
-            db.session.commit()
+    email = (request.form.get('email') or '').strip()
+    if email and '@' in email:
+        try:
+            if not NewsletterSubscriber.query.filter_by(email=email).first():
+                db.session.add(NewsletterSubscriber(email=email))
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
     return redirect(url_for('index'))
 
 
-# ==================== SEO SAYFALAR ====================
-
-from sitemap_generator import SitemapGenerator
-from rss_generator import RSSGenerator
+# ==================== SEO / FEED ====================
 
 @app.route('/sitemap.xml')
-def sitemap_xml():
-    xml = SitemapGenerator.generate_main_sitemap(app)
-    return Response(xml, mimetype='application/xml')
+def sitemap_root():
+    return Response(SitemapGenerator.generate_main_sitemap(app),
+                    mimetype='application/xml')
+
 
 @app.route('/sitemap-pages.xml')
-def sitemap_pages():
-    xml = SitemapGenerator.generate_pages_sitemap()
-    return Response(xml, mimetype='application/xml')
+def sitemap_pages_file():
+    return Response(SitemapGenerator.generate_pages_sitemap(),
+                    mimetype='application/xml')
+
 
 @app.route('/sitemap-news.xml')
-def sitemap_news():
-    xml = SitemapGenerator.generate_news_sitemap(app)
-    return Response(xml, mimetype='application/xml')
+def sitemap_news_file():
+    return Response(SitemapGenerator.generate_news_sitemap(app),
+                    mimetype='application/xml')
+
 
 @app.route('/sitemap-articles.xml')
-def sitemap_articles():
-    xml = SitemapGenerator.generate_articles_sitemap(app)
-    return Response(xml, mimetype='application/xml')
+def sitemap_articles_file():
+    return Response(SitemapGenerator.generate_articles_sitemap(app),
+                    mimetype='application/xml')
+
 
 @app.route('/rss')
 @app.route('/feed')
-def rss_main():
-    xml = RSSGenerator.generate_main_feed(app)
-    return Response(xml, mimetype='application/rss+xml')
+def rss_main_feed():
+    return Response(RSSGenerator.generate_main_feed(app),
+                    mimetype='application/rss+xml')
+
 
 @app.route('/rss/google-news')
-def rss_google_news():
-    xml = RSSGenerator.generate_google_news_feed(app)
-    return Response(xml, mimetype='application/rss+xml')
+def rss_google_feed():
+    return Response(RSSGenerator.generate_google_news_feed(app),
+                    mimetype='application/rss+xml')
+
 
 @app.route('/rss/breaking')
-def rss_breaking():
-    xml = RSSGenerator.generate_breaking_feed(app)
-    return Response(xml, mimetype='application/rss+xml')
+def rss_breaking_feed():
+    return Response(RSSGenerator.generate_breaking_feed(app),
+                    mimetype='application/rss+xml')
+
 
 @app.route('/rss/<category>')
-def rss_category(category):
-    xml = RSSGenerator.generate_category_feed(category, app)
-    return Response(xml, mimetype='application/rss+xml')
+def rss_category_feed(category):
+    return Response(RSSGenerator.generate_category_feed(category, app),
+                    mimetype='application/rss+xml')
+
 
 @app.route('/robots.txt')
-def robots():
-    content = f"""User-agent: *
-Allow: /
-Disallow: /api/
+def robots_txt():
+    txt = (f"User-agent: *\n"
+           f"Allow: /\n"
+           f"Disallow: /api/\n\n"
+           f"Sitemap: {Config.SITE_URL}/sitemap.xml\n")
+    return Response(txt, mimetype='text/plain')
 
-Sitemap: {Config.SITE_URL}/sitemap.xml
-"""
-    return Response(content, mimetype='text/plain')
-
-
-# ==================== GOOGLE VERIFICATION ====================
 
 @app.route('/google04f0ed8bce0d36b0.html')
-def google_verify():
-    return 'google-site-verification: google04f0ed8bce0d36b0.html'
+def google_site_verification():
+    return Response("google-site-verification: google04f0ed8bce0d36b0.html",
+                    mimetype='text/html')
 
 
-# ==================== YASAL SAYFALAR ====================
+# ==================== STATİK SAYFALAR ====================
 
 @app.route('/about')
-def about():
+def about_page():
     return render_template('about.html')
 
+
 @app.route('/privacy')
-def privacy():
+def privacy_page():
     return render_template('privacy.html')
 
+
 @app.route('/disclaimer')
-def disclaimer():
+def disclaimer_page():
     return render_template('disclaimer.html')
 
 
@@ -273,50 +291,56 @@ def disclaimer():
 
 @app.errorhandler(404)
 def not_found(e):
-    return render_template('base.html', error="Page not found"), 404
+    return render_template('base.html', error="Page not found (404)"), 404
+
 
 @app.errorhandler(500)
 def server_error(e):
-    return render_template('base.html', error="Server error"), 500
+    db.session.rollback()
+    return render_template('base.html', error="Server error (500)"), 500
 
 
 # ==================== TEMPLATE FİLTRELERİ ====================
 
 @app.template_filter('format_number')
 def format_number(value):
-    if value is None:
+    try:
+        value = float(value or 0)
+    except (TypeError, ValueError):
         return '$0'
     if value >= 1e12:
-        return f'${value/1e12:.2f}T'
-    elif value >= 1e9:
-        return f'${value/1e9:.2f}B'
-    elif value >= 1e6:
-        return f'${value/1e6:.2f}M'
-    elif value >= 1e3:
-        return f'${value/1e3:.2f}K'
-    else:
-        return f'${value:,.2f}'
+        return f'${value / 1e12:.2f}T'
+    if value >= 1e9:
+        return f'${value / 1e9:.2f}B'
+    if value >= 1e6:
+        return f'${value / 1e6:.2f}M'
+    if value >= 1e3:
+        return f'${value / 1e3:.2f}K'
+    return f'${value:,.2f}'
+
 
 @app.template_filter('time_ago')
 def time_ago(dt):
-    from datetime import datetime
     if not dt:
         return ''
-    now = datetime.utcnow()
-    diff = now - dt
-    seconds = diff.total_seconds()
-    if seconds < 60:
+    diff = datetime.utcnow() - dt
+    s = diff.total_seconds()
+    if s < 60:
         return 'just now'
-    elif seconds < 3600:
-        return f'{int(seconds / 60)}m ago'
-    elif seconds < 86400:
-        return f'{int(seconds / 3600)}h ago'
-    elif seconds < 604800:
-        return f'{int(seconds / 86400)}d ago'
-    else:
-        return dt.strftime('%b %d, %Y')
+    if s < 3600:
+        return f'{int(s / 60)}m ago'
+    if s < 86400:
+        return f'{int(s / 3600)}h ago'
+    if s < 604800:
+        return f'{int(s / 86400)}d ago'
+    return dt.strftime('%b %d, %Y')
+
+
+@app.context_processor
+def inject_globals():
+    return {'current_year': datetime.utcnow().year}
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)

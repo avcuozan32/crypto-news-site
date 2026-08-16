@@ -1,389 +1,468 @@
 ﻿import feedparser
-import requests
-from datetime import datetime, timedelta
-from database import db, Article
-from config import Config
-from slugify import slugify
-from bs4 import BeautifulSoup
-import re
 import hashlib
 import random
+import re
+from datetime import datetime
+from bs4 import BeautifulSoup
+from slugify import slugify
+
+from database import db, Article
+from config import Config
+from image_helper import ImageHelper
 
 
 class AutoNewsCollector:
+    """RSS beslemelerinden otomatik haber toplayıcı"""
+
     def __init__(self):
         self.feeds = Config.NEWS_RSS_FEEDS
         self.collected_hashes = set()
 
-    def _clean_html(self, html_content):
+    # ==================== YARDIMCILAR ====================
+
+    @staticmethod
+    def _clean_html(html_content):
         if not html_content:
             return ""
         soup = BeautifulSoup(html_content, 'html.parser')
         text = soup.get_text(separator=' ', strip=True)
-        text = re.sub(r'\s+', ' ', text)
-        return text.strip()
+        return re.sub(r'\s+', ' ', text).strip()
 
-    def _generate_hash(self, title):
+    @staticmethod
+    def _generate_hash(title):
         return hashlib.md5(title.lower().encode()).hexdigest()
+
+    @staticmethod
+    def _is_valid_image(url):
+        """Logo/ikon/placeholder görselleri ele"""
+        if not url or not url.startswith('http'):
+            return False
+        bad = ['logo', 'icon', 'avatar', 'sprite', 'placeholder',
+               'blank', 'pixel', '1x1', 'spacer', 'default-']
+        low = url.lower()
+        if any(b in low for b in bad):
+            return False
+        if low.endswith('.svg'):
+            return False
+        return True
 
     def _extract_image(self, entry):
         """RSS entry'den görsel URL'si çıkar"""
         # media:content
-        if hasattr(entry, 'media_content') and entry.media_content:
-            url = entry.media_content[0].get('url', '')
-            if url:
-                return url
+        try:
+            if hasattr(entry, 'media_content') and entry.media_content:
+                for m in entry.media_content:
+                    u = m.get('url', '')
+                    if self._is_valid_image(u):
+                        return u
+        except Exception:
+            pass
 
         # media:thumbnail
-        if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
-            url = entry.media_thumbnail[0].get('url', '')
-            if url:
-                return url
+        try:
+            if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+                for m in entry.media_thumbnail:
+                    u = m.get('url', '')
+                    if self._is_valid_image(u):
+                        return u
+        except Exception:
+            pass
 
         # enclosure
-        if hasattr(entry, 'enclosures') and entry.enclosures:
-            for enc in entry.enclosures:
-                if 'image' in enc.get('type', ''):
-                    return enc.get('href', '')
+        try:
+            if hasattr(entry, 'enclosures') and entry.enclosures:
+                for enc in entry.enclosures:
+                    if 'image' in (enc.get('type') or ''):
+                        u = enc.get('href', '')
+                        if self._is_valid_image(u):
+                            return u
+        except Exception:
+            pass
 
-        # İçerikten img çıkar
-        content = entry.get('summary', '') or entry.get('description', '')
-        if content:
-            soup = BeautifulSoup(content, 'html.parser')
-            img = soup.find('img')
-            if img and img.get('src'):
-                return img['src']
-
-        # content:encoded içinden dene
-        if hasattr(entry, 'content') and entry.content:
-            for c in entry.content:
-                soup = BeautifulSoup(c.get('value', ''), 'html.parser')
-                img = soup.find('img')
-                if img and img.get('src'):
-                    return img['src']
+        # content:encoded veya summary içindeki <img>
+        for field in ('content', 'summary', 'description'):
+            try:
+                raw = getattr(entry, field, None)
+                if isinstance(raw, list) and raw:
+                    raw = raw[0].get('value', '')
+                if not raw:
+                    continue
+                soup = BeautifulSoup(raw, 'html.parser')
+                for img in soup.find_all('img'):
+                    u = img.get('src') or img.get('data-src') or ''
+                    if self._is_valid_image(u):
+                        return u
+            except Exception:
+                continue
 
         return ''
 
-    def _get_fallback_image(self, category, title):
-        """Resim yoksa kategori bazlı varsayılan resim"""
-        fallback_images = {
-            'bitcoin': [
-                'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=800',
-                'https://images.unsplash.com/photo-1543699565-003b8adda5fc?w=800',
-                'https://images.unsplash.com/photo-1621761191319-c6fb62004040?w=800',
-            ],
-            'ethereum': [
-                'https://images.unsplash.com/photo-1622790698141-94e30457ef12?w=800',
-                'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800',
-            ],
-            'defi': [
-                'https://images.unsplash.com/photo-1620321023374-d1a68fbc720d?w=800',
-                'https://images.unsplash.com/photo-1642104704074-907c0698cbd9?w=800',
-            ],
-            'nft': [
-                'https://images.unsplash.com/photo-1646153742982-7b80f4b4a3d0?w=800',
-                'https://images.unsplash.com/photo-1637858868799-7f26a0640eb6?w=800',
-            ],
-            'market': [
-                'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800',
-                'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800',
-            ],
-            'web3': [
-                'https://images.unsplash.com/photo-1639322537228-f710d846310a?w=800',
-                'https://images.unsplash.com/photo-1644143379190-08a5f055de1d?w=800',
-            ],
-            'regulation': [
-                'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=800',
-                'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=800',
-            ],
-            'security': [
-                'https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=800',
-                'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
-            ],
-            'altcoins': [
-                'https://images.unsplash.com/photo-1621416894569-0f39ed31d247?w=800',
-                'https://images.unsplash.com/photo-1629339942248-45d4b10c8c2f?w=800',
-            ],
-            'exchange': [
-                'https://images.unsplash.com/photo-1560221328-12fe60f83ab8?w=800',
-                'https://images.unsplash.com/photo-1601597111158-2fceff292cdc?w=800',
-            ],
-            'news': [
-                'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800',
-                'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=800',
-            ],
-        }
-        category_images = fallback_images.get(category, fallback_images['news'])
-        return random.choice(category_images)
-
-    def _categorize(self, title, content):
+    @staticmethod
+    def _categorize(title, content):
         text = (title + ' ' + content).lower()
         categories = {
-            'defi': ['defi', 'decentralized finance', 'yield', 'liquidity', 'dex', 'swap', 'lending'],
-            'nft': ['nft', 'non-fungible', 'opensea', 'digital art', 'collectible'],
-            'regulation': ['sec', 'regulation', 'regulatory', 'law', 'legal', 'ban', 'compliance', 'court'],
-            'bitcoin': ['bitcoin', 'btc', 'satoshi', 'halving', 'mining'],
-            'ethereum': ['ethereum', 'eth', 'vitalik', 'layer 2', 'l2'],
-            'altcoins': ['altcoin', 'solana', 'cardano', 'polkadot', 'avalanche', 'polygon'],
-            'exchange': ['binance', 'coinbase', 'kraken', 'exchange', 'listing', 'delist'],
-            'web3': ['web3', 'metaverse', 'gamefi', 'play-to-earn', 'dao'],
-            'security': ['hack', 'exploit', 'vulnerability', 'scam', 'fraud', 'phishing'],
-            'market': ['price', 'market', 'bull', 'bear', 'rally', 'crash', 'surge', 'dump'],
-            'technology': ['blockchain', 'protocol', 'upgrade', 'fork', 'consensus'],
+            'security':   ['hack', 'exploit', 'vulnerabil', 'scam', 'fraud', 'phishing', 'stolen', 'breach'],
+            'regulation': ['sec ', 'regulat', 'lawsuit', 'court', 'ban ', 'compliance', 'legislation', 'senate'],
+            'defi':       ['defi', 'decentralized finance', 'yield', 'liquidity', 'dex', 'lending', 'tvl'],
+            'nft':        ['nft', 'non-fungible', 'opensea', 'collectible', 'digital art'],
+            'web3':       ['web3', 'metaverse', 'gamefi', 'play-to-earn', 'dao ', 'airdrop'],
+            'exchange':   ['binance', 'coinbase', 'kraken', 'listing', 'delist', 'exchange'],
+            'bitcoin':    ['bitcoin', 'btc', 'satoshi', 'halving', 'mining', 'miner'],
+            'ethereum':   ['ethereum', ' eth ', 'vitalik', 'layer 2', 'l2 ', 'staking'],
+            'altcoins':   ['altcoin', 'solana', 'cardano', 'polkadot', 'avalanche', 'polygon', 'xrp', 'dogecoin'],
+            'market':     ['price', 'market', 'bull', 'bear', 'rally', 'crash', 'surge', 'dump', 'etf'],
+            'technology': ['blockchain', 'protocol', 'upgrade', 'fork', 'consensus', 'zk-'],
         }
-        for category, keywords in categories.items():
-            for keyword in keywords:
-                if keyword in text:
-                    return category
+        for cat, keys in categories.items():
+            if any(k in text for k in keys):
+                return cat
         return 'news'
 
-    def _extract_tags(self, title, content):
+    @staticmethod
+    def _extract_tags(title, content):
         text = (title + ' ' + content).lower()
-        possible_tags = [
+        possible = [
             'bitcoin', 'ethereum', 'solana', 'cardano', 'ripple', 'xrp',
             'binance', 'coinbase', 'defi', 'nft', 'web3', 'metaverse',
             'sec', 'regulation', 'mining', 'staking', 'layer2', 'dao',
             'polygon', 'avalanche', 'polkadot', 'chainlink', 'dogecoin',
-            'ai', 'etf', 'halving', 'whale', 'hack', 'security',
-            'gamefi', 'airdrop', 'token', 'ico'
+            'etf', 'halving', 'whale', 'hack', 'security', 'airdrop', 'token',
         ]
-        tags = [tag for tag in possible_tags if tag in text]
-        return tags[:10]
+        return [t for t in possible if t in text][:10]
 
-    def _rewrite_content(self, title, summary, source):
-        clean_summary = self._clean_html(summary)
-        if len(clean_summary) < 50:
-            clean_summary = title
+    @staticmethod
+    def _rewrite_content(title, summary, source, source_url):
+        clean = AutoNewsCollector._clean_html(summary)
+        if len(clean) < 40:
+            clean = title
 
-        intro_templates = [
-            f"In a significant development for the cryptocurrency market, {clean_summary}",
-            f"The crypto community is buzzing after {clean_summary}",
-            f"Breaking crypto news: {clean_summary}",
-            f"In the latest development from the digital asset space, {clean_summary}",
-            f"Crypto markets are reacting to the news that {clean_summary}",
+        intros = [
+            f"In a significant development for the cryptocurrency market, {clean}",
+            f"The crypto community is closely watching as {clean}",
+            f"Breaking crypto news: {clean}",
+            f"In the latest development from the digital asset space, {clean}",
+            f"Crypto markets are reacting to reports that {clean}",
         ]
-        intro = random.choice(intro_templates)
+        intro = random.choice(intros)
 
-        content = f"""
-        <div class="article-content">
-            <p class="lead">{intro}</p>
-            <h2>Key Details</h2>
-            <p>{clean_summary}</p>
-            <h2>Market Impact</h2>
-            <p>This development could have significant implications for the broader 
-            cryptocurrency market. Traders and investors are closely monitoring the 
-            situation for potential price movements.</p>
-            <h2>What This Means for Investors</h2>
-            <p>As always, investors should conduct their own research (DYOR) before 
-            making any investment decisions. The cryptocurrency market remains highly 
-            volatile and unpredictable.</p>
-            <div class="disclaimer-box">
-                <p><strong>Disclaimer:</strong> This article is for informational purposes 
-                only and should not be considered as financial advice. Always do your own 
-                research before making investment decisions.</p>
-            </div>
-            <p class="source-credit"><em>Source: {source}</em></p>
-        </div>
-        """
-        return content.strip()
+        return f"""
+<div class="article-content">
+    <p class="lead">{intro}</p>
+
+    <h2>Key Details</h2>
+    <p>{clean}</p>
+
+    <h2>Market Impact</h2>
+    <p>This development could carry implications for the broader cryptocurrency
+    market. Traders and investors are monitoring the situation for potential
+    volatility and price movements across major digital assets.</p>
+
+    <h2>What This Means for Investors</h2>
+    <p>As always, market participants should conduct their own research (DYOR)
+    before making any investment decisions. The cryptocurrency market remains
+    highly volatile and sensitive to news events, regulatory shifts, and
+    macroeconomic conditions.</p>
+
+    <div class="disclaimer-box">
+        <p><strong>Disclaimer:</strong> This article is for informational purposes
+        only and should not be considered financial advice. Always do your own
+        research before making investment decisions.</p>
+    </div>
+
+    <p class="source-credit"><em>Source: <a href="{source_url}" target="_blank"
+    rel="noopener nofollow">{source}</a></em></p>
+</div>
+""".strip()
+
+    # ==================== ANA TOPLAYICI ====================
 
     def collect_from_rss(self, app):
         with app.app_context():
-            new_articles = []
+            new_titles = []
 
             for feed_url in self.feeds:
                 try:
                     feed = feedparser.parse(feed_url)
-                    source_name = feed.feed.get('title', 'Unknown Source')
+                    source_name = feed.feed.get('title', 'Crypto Source')
 
-                    for entry in feed.entries[:5]:
-                        title = entry.get('title', '').strip()
-                        if not title:
+                    for entry in feed.entries[:6]:
+                        title = (entry.get('title') or '').strip()
+                        if not title or len(title) < 15:
                             continue
 
-                        title_hash = self._generate_hash(title)
-                        if title_hash in self.collected_hashes:
+                        h = self._generate_hash(title)
+                        if h in self.collected_hashes:
                             continue
 
                         slug = slugify(title)[:200]
-                        existing = Article.query.filter_by(slug=slug).first()
-                        if existing:
+                        if Article.query.filter_by(slug=slug).first():
+                            self.collected_hashes.add(h)
                             continue
 
-                        summary = self._clean_html(
-                            entry.get('summary', '') or entry.get('description', '')
-                        )[:500]
+                        raw_summary = entry.get('summary', '') or entry.get('description', '')
+                        summary = self._clean_html(raw_summary)[:500]
+                        source_url = entry.get('link', '')
 
-                        content = self._rewrite_content(title, summary, source_name)
                         category = self._categorize(title, summary)
-
-                        # Resim çıkar, yoksa fallback kullan
-                        image_url = self._extract_image(entry)
-                        if not image_url:
-                            image_url = self._get_fallback_image(category, title)
-
                         tags = self._extract_tags(title, summary)
+                        content = self._rewrite_content(
+                            title, raw_summary, source_name, source_url)
 
-                        published = entry.get('published_parsed')
-                        if published:
-                            pub_date = datetime(*published[:6])
-                        else:
-                            pub_date = datetime.utcnow()
+                        # --- GÖRSEL ÇÖZÜMLEME (3 katmanlı) ---
+                        image_url = self._extract_image(entry)
+                        if not self._is_valid_image(image_url):
+                            image_url = ImageHelper.resolve_image(
+                                rss_image=None,
+                                source_url=source_url,
+                                category=category,
+                                article_id=abs(hash(slug)) % 1000,
+                            )
+                        # -------------------------------------
 
-                        seo_title = f"{title} | {Config.SITE_NAME}"[:200]
-                        seo_desc = summary[:160] if summary else title[:160]
+                        published = entry.get('published_parsed') or entry.get('updated_parsed')
+                        pub_date = datetime(*published[:6]) if published else datetime.utcnow()
 
                         article = Article(
                             title=title,
                             slug=slug,
                             content=content,
-                            summary=summary,
+                            summary=summary or title,
                             category=category,
                             source=source_name,
-                            source_url=entry.get('link', ''),
+                            source_url=source_url,
                             image_url=image_url,
                             author='CryptoNest AI',
                             is_auto_generated=True,
                             is_published=True,
-                            seo_title=seo_title,
-                            seo_description=seo_desc,
+                            seo_title=f"{title[:150]} | {Config.SITE_NAME}",
+                            seo_description=(summary or title)[:160],
                             created_at=pub_date,
                         )
                         article.set_tags(tags)
 
                         db.session.add(article)
-                        self.collected_hashes.add(title_hash)
-                        new_articles.append(title)
+                        self.collected_hashes.add(h)
+                        new_titles.append(title)
 
                 except Exception as e:
-                    print(f"RSS Error ({feed_url}): {e}")
+                    print(f"[rss] error ({feed_url}): {e}")
                     continue
 
-            db.session.commit()
-            print(f"✅ {len(new_articles)} new articles collected")
-            return new_articles
+            try:
+                db.session.commit()
+                print(f"[rss] {len(new_titles)} new articles collected")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[rss] commit error: {e}")
+
+            return new_titles
 
 
 class PriceAlertNewsGenerator:
+    """Büyük fiyat hareketlerinden otomatik haber üretir"""
+
     def generate_price_alert_news(self, alerts, app):
         with app.app_context():
-            for alert in alerts:
-                direction_word = "Surges" if alert['direction'] == 'up' else "Drops"
-                direction_emoji = "🚀" if alert['direction'] == 'up' else "📉"
+            created = 0
 
-                title = f"{alert['coin']} ({alert['symbol']}) {direction_word} {alert['change_pct']:.1f}% – What's Behind the Move?"
+            for a in alerts:
+                try:
+                    up = a['direction'] == 'up'
+                    word = "Surges" if up else "Drops"
+                    emoji = "🚀" if up else "📉"
+                    cls = "bullish" if up else "bearish"
 
-                content = f"""
-                <div class="article-content">
-                    <div class="price-alert-banner {'bullish' if alert['direction'] == 'up' else 'bearish'}">
-                        <span class="alert-emoji">{direction_emoji}</span>
-                        <span class="alert-text">PRICE ALERT</span>
-                    </div>
-                    <p class="lead"><strong>{alert['coin']} ({alert['symbol']})</strong> has 
-                    {'surged' if alert['direction'] == 'up' else 'dropped'} by 
-                    <strong>{alert['change_pct']:.1f}%</strong>, moving from 
-                    <strong>${alert['old_price']:,.2f}</strong> to 
-                    <strong>${alert['new_price']:,.2f}</strong>.</p>
-                    <h2>Price Movement Details</h2>
-                    <table class="price-table">
-                        <tr><td>Previous Price</td><td>${alert['old_price']:,.2f}</td></tr>
-                        <tr><td>Current Price</td><td>${alert['new_price']:,.2f}</td></tr>
-                        <tr><td>Change</td><td>{alert['change_pct']:.1f}%</td></tr>
-                    </table>
-                    <h2>Market Analysis</h2>
-                    <p>The {'upward' if alert['direction'] == 'up' else 'downward'} movement in 
-                    {alert['coin']} price could be attributed to several factors including market 
-                    sentiment, trading volume changes, and broader cryptocurrency market trends.</p>
-                    <div class="disclaimer-box">
-                        <p><strong>Disclaimer:</strong> This is not financial advice. DYOR.</p>
-                    </div>
-                </div>
-                """
+                    title = (f"{a['coin']} ({a['symbol']}) {word} "
+                             f"{a['change_pct']:.1f}% – What's Behind the Move?")
+                    slug = slugify(title)[:200]
 
-                summary = f"{alert['coin']} ({alert['symbol']}) {'surges' if alert['direction'] == 'up' else 'drops'} {alert['change_pct']:.1f}%."
+                    if Article.query.filter_by(slug=slug).first():
+                        continue
 
-                fallback_img = {
-                    'BTC': 'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=800',
-                    'ETH': 'https://images.unsplash.com/photo-1622790698141-94e30457ef12?w=800',
-                }.get(alert['symbol'], 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800')
+                    category = 'bitcoin' if a['symbol'] == 'BTC' else \
+                               'ethereum' if a['symbol'] == 'ETH' else 'market'
 
-                slug = slugify(title)[:200]
-                existing = Article.query.filter_by(slug=slug).first()
-                if not existing:
+                    image_url = ImageHelper.get_fallback_image(category)
+
+                    content = f"""
+<div class="article-content">
+    <div class="price-alert-banner {cls}">
+        <span class="alert-emoji">{emoji}</span>
+        <span class="alert-text">PRICE ALERT</span>
+    </div>
+
+    <p class="lead"><strong>{a['coin']} ({a['symbol']})</strong> has
+    {'surged' if up else 'dropped'} by <strong>{a['change_pct']:.1f}%</strong>,
+    moving from <strong>${a['old_price']:,.2f}</strong> to
+    <strong>${a['new_price']:,.2f}</strong>.</p>
+
+    <h2>Price Movement Details</h2>
+    <table class="price-table">
+        <tr><td>Previous Price</td><td>${a['old_price']:,.2f}</td></tr>
+        <tr><td>Current Price</td><td>${a['new_price']:,.2f}</td></tr>
+        <tr><td>Change</td><td>{a['change_pct']:.2f}%</td></tr>
+        <tr><td>Direction</td><td>{'📈 Bullish' if up else '📉 Bearish'}</td></tr>
+    </table>
+
+    <h2>Market Analysis</h2>
+    <p>The {'upward' if up else 'downward'} movement in {a['coin']} may be
+    attributed to shifting market sentiment, changes in trading volume, and
+    broader trends across the cryptocurrency sector.</p>
+
+    <h2>What Traders Should Watch</h2>
+    <ul>
+        <li>Key support and resistance levels</li>
+        <li>24-hour trading volume trends</li>
+        <li>Overall market sentiment and Bitcoin dominance</li>
+        <li>Upcoming events, listings or protocol announcements</li>
+    </ul>
+
+    <div class="disclaimer-box">
+        <p><strong>Disclaimer:</strong> This is not financial advice.
+        Always DYOR before making investment decisions.</p>
+    </div>
+</div>
+""".strip()
+
+                    summary = (f"{a['coin']} ({a['symbol']}) "
+                               f"{'surges' if up else 'drops'} {a['change_pct']:.1f}% "
+                               f"from ${a['old_price']:,.2f} to ${a['new_price']:,.2f}.")
+
                     article = Article(
                         title=title,
                         slug=slug,
                         content=content,
                         summary=summary,
-                        category='market',
+                        category=category,
+                        image_url=image_url,
                         author='CryptoNest Price Bot',
                         is_auto_generated=True,
                         is_published=True,
-                        is_breaking=True,
-                        image_url=fallback_img,
+                        is_breaking=a['change_pct'] >= 10,
+                        seo_title=f"{title[:150]} | {Config.SITE_NAME}",
+                        seo_description=summary[:160],
                     )
-                    article.set_tags([alert['symbol'].lower(), 'price-alert', 'market'])
+                    article.set_tags([a['symbol'].lower(), 'price-alert', 'market',
+                                      'bullish' if up else 'bearish'])
                     db.session.add(article)
+                    created += 1
+                except Exception as e:
+                    print(f"[alert] error: {e}")
+                    continue
 
-            db.session.commit()
+            try:
+                db.session.commit()
+                if created:
+                    print(f"[alert] {created} price alert articles created")
+            except Exception as e:
+                db.session.rollback()
+                print(f"[alert] commit error: {e}")
 
 
 class MarketSummaryGenerator:
+    """Günlük piyasa özeti üretir"""
+
     def generate_daily_summary(self, coins_data, global_data, app):
         with app.app_context():
+            if not coins_data:
+                print("[summary] no coin data")
+                return False
+
             today = datetime.utcnow().strftime('%B %d, %Y')
-
-            sorted_coins = sorted(coins_data, key=lambda x: x.get('price_change_percentage_24h', 0) or 0, reverse=True)
-            top_gainers = sorted_coins[:3]
-            top_losers = sorted_coins[-3:]
-
             title = f"Crypto Market Daily Recap – {today}"
+            slug = slugify(title)[:200]
 
-            gainers_html = ""
-            for coin in top_gainers:
-                change = coin.get('price_change_percentage_24h', 0) or 0
-                gainers_html += f"<li><strong>{coin['name']} ({coin['symbol'].upper()})</strong>: ${coin['current_price']:,.2f} ({'+' if change > 0 else ''}{change:.1f}%)</li>"
+            if Article.query.filter_by(slug=slug).first():
+                return False
 
-            losers_html = ""
-            for coin in top_losers:
-                change = coin.get('price_change_percentage_24h', 0) or 0
-                losers_html += f"<li><strong>{coin['name']} ({coin['symbol'].upper()})</strong>: ${coin['current_price']:,.2f} ({change:.1f}%)</li>"
+            def pct(c):
+                return c.get('price_change_percentage_24h') or 0
 
-            total_mcap = sum((c.get('market_cap', 0) or 0) for c in coins_data)
+            ordered = sorted(coins_data, key=pct, reverse=True)
+            gainers = ordered[:5]
+            losers = ordered[-5:]
+
+            def row_list(items):
+                html = ""
+                for c in items:
+                    ch = pct(c)
+                    color = '#10b981' if ch >= 0 else '#ef4444'
+                    html += (f"<li><strong>{c.get('name')} "
+                             f"({(c.get('symbol') or '').upper()})</strong>: "
+                             f"${(c.get('current_price') or 0):,.2f} "
+                             f"<span style='color:{color}'>"
+                             f"{'+' if ch >= 0 else ''}{ch:.2f}%</span></li>")
+                return html
+
+            total_mcap = global_data.get('total_market_cap', 0) or 0
+            btc_dom = global_data.get('btc_dominance', 0) or 0
+            change_24h = global_data.get('market_cap_change_24h', 0) or 0
+            total_vol = global_data.get('total_volume', 0) or 0
+
+            mcap_str = f"${total_mcap / 1e12:.2f}T" if total_mcap >= 1e12 \
+                else f"${total_mcap / 1e9:.2f}B"
+            vol_str = f"${total_vol / 1e9:.2f}B" if total_vol >= 1e9 \
+                else f"${total_vol / 1e6:.2f}M"
 
             content = f"""
-            <div class="article-content">
-                <p class="lead">Here's your daily cryptocurrency market recap for {today}. 
-                The total tracked market cap stands at approximately 
-                <strong>${total_mcap/1e12:.2f} trillion</strong>.</p>
-                <h2>🟢 Top Gainers (24h)</h2>
-                <ul>{gainers_html}</ul>
-                <h2>🔴 Top Losers (24h)</h2>
-                <ul>{losers_html}</ul>
-                <div class="disclaimer-box">
-                    <p><strong>Disclaimer:</strong> This market recap is for informational 
-                    purposes only and does not constitute financial advice.</p>
-                </div>
-            </div>
-            """
+<div class="article-content">
+    <p class="lead">Here is your daily cryptocurrency market recap for
+    <strong>{today}</strong>. The total tracked crypto market cap stands at
+    approximately <strong>{mcap_str}</strong>, with Bitcoin dominance at
+    <strong>{btc_dom:.1f}%</strong>.</p>
 
-            slug = slugify(title)[:200]
-            existing = Article.query.filter_by(slug=slug).first()
-            if not existing:
-                article = Article(
-                    title=title,
-                    slug=slug,
-                    content=content,
-                    summary=f"Daily crypto market recap for {today}.",
-                    category='market',
-                    author='CryptoNest Market Bot',
-                    is_auto_generated=True,
-                    is_published=True,
-                    is_featured=True,
-                    image_url='https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800',
-                )
-                article.set_tags(['market-recap', 'daily-summary', 'bitcoin', 'ethereum'])
-                db.session.add(article)
+    <h2>🟢 Top Gainers (24h)</h2>
+    <ul>{row_list(gainers)}</ul>
+
+    <h2>🔴 Top Losers (24h)</h2>
+    <ul>{row_list(losers)}</ul>
+
+    <h2>📊 Market Overview</h2>
+    <p>The cryptocurrency market has shown
+    <strong>{'bullish' if change_24h >= 0 else 'bearish'}</strong> sentiment
+    over the last 24 hours, with an aggregate change of
+    <strong>{change_24h:+.2f}%</strong>.</p>
+
+    <h2>🔍 Key Metrics</h2>
+    <table class="market-table">
+        <tr><td>Total Market Cap</td><td>{mcap_str}</td></tr>
+        <tr><td>24h Volume</td><td>{vol_str}</td></tr>
+        <tr><td>BTC Dominance</td><td>{btc_dom:.1f}%</td></tr>
+        <tr><td>24h Market Change</td><td>{change_24h:+.2f}%</td></tr>
+    </table>
+
+    <div class="disclaimer-box">
+        <p><strong>Disclaimer:</strong> This market recap is for informational
+        purposes only and does not constitute financial advice.</p>
+    </div>
+</div>
+""".strip()
+
+            summary = (f"Daily crypto market recap for {today}. "
+                       f"Total market cap: {mcap_str}. BTC dominance: {btc_dom:.1f}%.")
+
+            article = Article(
+                title=title,
+                slug=slug,
+                content=content,
+                summary=summary,
+                category='market',
+                image_url=ImageHelper.get_fallback_image('market'),
+                author='CryptoNest Market Bot',
+                is_auto_generated=True,
+                is_published=True,
+                is_featured=True,
+                seo_title=f"{title} | {Config.SITE_NAME}",
+                seo_description=summary[:160],
+            )
+            article.set_tags(['market-recap', 'daily-summary', 'bitcoin', 'ethereum'])
+
+            db.session.add(article)
+            try:
                 db.session.commit()
+                print("[summary] daily market recap created")
                 return True
-            return False
+            except Exception as e:
+                db.session.rollback()
+                print(f"[summary] commit error: {e}")
+                return False
