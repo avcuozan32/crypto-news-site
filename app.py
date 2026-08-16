@@ -2,26 +2,18 @@
 from flask_caching import Cache
 from database import db, init_db, Article, CoinPrice, NewsletterSubscriber
 from config import Config
-from seo_manager import SEOManager
 from scheduler import setup_scheduler
 from price_tracker import PriceTracker
 import os
 
-# Flask uygulamasını oluştur
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# Veritabanı başlat
 init_db(app)
-
-# Cache ayarları
 cache = Cache(app)
-
-# Price Tracker
 tracker = PriceTracker()
-
-# Scheduler başlat
 scheduler = setup_scheduler(app)
+
 
 # ==================== ANA SAYFALAR ====================
 
@@ -54,6 +46,7 @@ def index():
         page=page,
     )
 
+
 @app.route('/article/<slug>')
 def article(slug):
     article = Article.query.filter_by(slug=slug, is_published=True).first_or_404()
@@ -67,6 +60,7 @@ def article(slug):
     ).order_by(Article.created_at.desc()).limit(4).all()
 
     return render_template('article.html', article=article, related=related)
+
 
 @app.route('/category/<category>')
 @cache.cached(timeout=120)
@@ -100,13 +94,40 @@ def category(category):
         page=page,
     )
 
+
 @app.route('/market')
-@cache.cached(timeout=120)
+@cache.cached(timeout=60)
 def market():
     coins = CoinPrice.query.order_by(CoinPrice.market_cap_rank).all()
-    summary = tracker.get_market_summary(app)
-    trending = tracker.fetch_trending()
-    return render_template('market.html', coins=coins, summary=summary, trending=trending)
+
+    total_market_cap = sum((c.market_cap or 0) for c in coins)
+    total_volume = sum((c.total_volume or 0) for c in coins)
+
+    btc = next((c for c in coins if c.symbol == 'BTC'), None)
+    eth = next((c for c in coins if c.symbol == 'ETH'), None)
+
+    btc_dominance = 0
+    eth_dominance = 0
+    if total_market_cap > 0:
+        if btc:
+            btc_dominance = (btc.market_cap or 0) / total_market_cap * 100
+        if eth:
+            eth_dominance = (eth.market_cap or 0) / total_market_cap * 100
+
+    changes = [c.price_change_percentage_24h for c in coins if c.price_change_percentage_24h is not None]
+    avg_change = sum(changes) / len(changes) if changes else 0
+
+    summary = {
+        'total_market_cap': total_market_cap,
+        'total_volume': total_volume,
+        'btc_dominance': btc_dominance,
+        'eth_dominance': eth_dominance,
+        'active_cryptocurrencies': len(coins),
+        'market_cap_change_24h': avg_change,
+    }
+
+    return render_template('market.html', coins=coins, summary=summary, trending=[])
+
 
 @app.route('/search')
 def search():
@@ -130,6 +151,7 @@ def search():
         page=page,
     )
 
+
 # ==================== API ENDPOINTS ====================
 
 @app.route('/api/prices')
@@ -138,18 +160,6 @@ def api_prices():
     coins = CoinPrice.query.order_by(CoinPrice.market_cap_rank).limit(50).all()
     return jsonify([coin.to_dict() for coin in coins])
 
-@app.route('/api/articles')
-@cache.cached(timeout=120)
-def api_articles():
-    limit = request.args.get('limit', 10, type=int)
-    category = request.args.get('category', None)
-
-    query = Article.query.filter_by(is_published=True)
-    if category:
-        query = query.filter_by(category=category)
-
-    articles = query.order_by(Article.created_at.desc()).limit(limit).all()
-    return jsonify([a.to_dict() for a in articles])
 
 @app.route('/api/ticker')
 @cache.cached(timeout=30)
@@ -165,6 +175,7 @@ def api_ticker():
         })
     return jsonify(ticker_data)
 
+
 # ==================== NEWSLETTER ====================
 
 @app.route('/subscribe', methods=['POST'])
@@ -178,20 +189,70 @@ def subscribe():
             db.session.commit()
     return redirect(url_for('index'))
 
+
 # ==================== SEO SAYFALAR ====================
+
+from sitemap_generator import SitemapGenerator
+from rss_generator import RSSGenerator
 
 @app.route('/sitemap.xml')
 def sitemap_xml():
-    from sitemap_generator import SitemapGenerator
     xml = SitemapGenerator.generate_main_sitemap(app)
+    return Response(xml, mimetype='application/xml')
+
+@app.route('/sitemap-pages.xml')
+def sitemap_pages():
+    xml = SitemapGenerator.generate_pages_sitemap()
+    return Response(xml, mimetype='application/xml')
+
+@app.route('/sitemap-news.xml')
+def sitemap_news():
+    xml = SitemapGenerator.generate_news_sitemap(app)
+    return Response(xml, mimetype='application/xml')
+
+@app.route('/sitemap-articles.xml')
+def sitemap_articles():
+    xml = SitemapGenerator.generate_articles_sitemap(app)
     return Response(xml, mimetype='application/xml')
 
 @app.route('/rss')
 @app.route('/feed')
-def rss_feed():
-    from rss_generator import RSSGenerator
+def rss_main():
     xml = RSSGenerator.generate_main_feed(app)
     return Response(xml, mimetype='application/rss+xml')
+
+@app.route('/rss/google-news')
+def rss_google_news():
+    xml = RSSGenerator.generate_google_news_feed(app)
+    return Response(xml, mimetype='application/rss+xml')
+
+@app.route('/rss/breaking')
+def rss_breaking():
+    xml = RSSGenerator.generate_breaking_feed(app)
+    return Response(xml, mimetype='application/rss+xml')
+
+@app.route('/rss/<category>')
+def rss_category(category):
+    xml = RSSGenerator.generate_category_feed(category, app)
+    return Response(xml, mimetype='application/rss+xml')
+
+@app.route('/robots.txt')
+def robots():
+    content = f"""User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: {Config.SITE_URL}/sitemap.xml
+"""
+    return Response(content, mimetype='text/plain')
+
+
+# ==================== GOOGLE VERIFICATION ====================
+
+@app.route('/google04f0ed8bce0d36b0.html')
+def google_verify():
+    return 'google-site-verification: google04f0ed8bce0d36b0.html'
+
 
 # ==================== YASAL SAYFALAR ====================
 
@@ -207,6 +268,7 @@ def privacy():
 def disclaimer():
     return render_template('disclaimer.html')
 
+
 # ==================== HATA SAYFALARI ====================
 
 @app.errorhandler(404)
@@ -217,12 +279,13 @@ def not_found(e):
 def server_error(e):
     return render_template('base.html', error="Server error"), 500
 
+
 # ==================== TEMPLATE FİLTRELERİ ====================
 
 @app.template_filter('format_number')
 def format_number(value):
     if value is None:
-        return '0'
+        return '$0'
     if value >= 1e12:
         return f'${value/1e12:.2f}T'
     elif value >= 1e9:
@@ -241,26 +304,18 @@ def time_ago(dt):
         return ''
     now = datetime.utcnow()
     diff = now - dt
-
     seconds = diff.total_seconds()
     if seconds < 60:
         return 'just now'
     elif seconds < 3600:
-        minutes = int(seconds / 60)
-        return f'{minutes}m ago'
+        return f'{int(seconds / 60)}m ago'
     elif seconds < 86400:
-        hours = int(seconds / 3600)
-        return f'{hours}h ago'
+        return f'{int(seconds / 3600)}h ago'
     elif seconds < 604800:
-        days = int(seconds / 86400)
-        return f'{days}d ago'
+        return f'{int(seconds / 86400)}d ago'
     else:
         return dt.strftime('%b %d, %Y')
 
-    # ========== GOOGLE VERIFICATION ==========
-@app.route('/google04f0ed8bce0d36b0.html')
-def google_verify():
-    return 'google-site-verification: google04f0ed8bce0d36b0.html'
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

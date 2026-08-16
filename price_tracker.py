@@ -8,7 +8,6 @@ import time
 class PriceTracker:
     def __init__(self):
         self.api_url = Config.COINGECKO_API_URL
-        self.previous_prices = {}
 
     def fetch_prices(self):
         """CoinGecko API'den fiyatları çek"""
@@ -46,30 +45,6 @@ class PriceTracker:
             print(f"Trending error: {e}")
             return []
 
-        def fetch_global_data(self):
-        """Genel piyasa verilerini çek - 3 deneme"""
-        for attempt in range(3):
-            try:
-                url = f"{self.api_url}/global"
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                                  'AppleWebKit/537.36 (KHTML, like Gecko) '
-                                  'Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'application/json',
-                }
-                response = requests.get(url, headers=headers, timeout=20)
-                if response.status_code == 200:
-                    return response.json().get('data', {})
-                elif response.status_code == 429:
-                    print(f"Rate limited, attempt {attempt+1}/3")
-                    time.sleep(5)
-                else:
-                    print(f"Global API error: {response.status_code}")
-            except Exception as e:
-                print(f"Global data error (attempt {attempt+1}): {e}")
-                time.sleep(2)
-        return {}
-
     def update_prices(self, app):
         """Veritabanındaki fiyatları güncelle"""
         with app.app_context():
@@ -80,7 +55,6 @@ class PriceTracker:
                 existing = CoinPrice.query.filter_by(coin_id=coin['id']).first()
 
                 if existing:
-                    # Önceki fiyatı sakla (alarm için)
                     old_price = existing.current_price
 
                     existing.current_price = coin.get('current_price', 0)
@@ -96,7 +70,6 @@ class PriceTracker:
                     existing.image_url = coin.get('image', '')
                     existing.last_updated = datetime.utcnow()
 
-                    # Büyük fiyat değişimi kontrolü
                     if old_price and old_price > 0:
                         change_pct = abs((existing.current_price - old_price) / old_price * 100)
                         if change_pct >= Config.PRICE_ALERT_THRESHOLD:
@@ -118,6 +91,7 @@ class PriceTracker:
                         total_volume=coin.get('total_volume', 0),
                         price_change_24h=coin.get('price_change_24h', 0),
                         price_change_percentage_24h=coin.get('price_change_percentage_24h', 0),
+                        price_change_percentage_7d=coin.get('price_change_percentage_7d_in_currency', 0),
                         market_cap_rank=coin.get('market_cap_rank', 0),
                         ath=coin.get('ath', 0),
                         atl=coin.get('atl', 0),
@@ -129,65 +103,10 @@ class PriceTracker:
             db.session.commit()
             return alerts
 
-        def get_market_summary(self, app=None):
-        """Piyasa özeti - API başarısız olursa DB'den hesapla"""
-        global_data = self.fetch_global_data()
-
-        total_mcap = global_data.get('total_market_cap', {}).get('usd', 0)
-
-        # API çalıştıysa direkt döndür
-        if total_mcap and total_mcap > 0:
-            return {
-                'total_market_cap': total_mcap,
-                'total_volume': global_data.get('total_volume', {}).get('usd', 0),
-                'btc_dominance': global_data.get('market_cap_percentage', {}).get('btc', 0),
-                'eth_dominance': global_data.get('market_cap_percentage', {}).get('eth', 0),
-                'active_cryptocurrencies': global_data.get('active_cryptocurrencies', 0),
-                'market_cap_change_24h': global_data.get('market_cap_change_percentage_24h_usd', 0),
-            }
-
-        # API başarısız → Veritabanından hesapla
-        return self._calculate_from_db(app)
-
-    def _calculate_from_db(self, app=None):
-        """Veritabanındaki coinlerden piyasa özeti hesapla"""
-        from database import CoinPrice
-
-        try:
-            coins = CoinPrice.query.all()
-            if not coins:
-                return self._empty_summary()
-
-            total_mcap = sum(c.market_cap or 0 for c in coins)
-            total_vol = sum(c.total_volume or 0 for c in coins)
-
-            btc = next((c for c in coins if c.symbol.upper() == 'BTC'), None)
-            eth = next((c for c in coins if c.symbol.upper() == 'ETH'), None)
-
-            btc_dom = ((btc.market_cap / total_mcap) * 100) if btc and total_mcap else 0
-            eth_dom = ((eth.market_cap / total_mcap) * 100) if eth and total_mcap else 0
-
-            # Ortalama 24s değişim (market cap ağırlıklı)
-            weighted_change = 0
-            if total_mcap > 0:
-                for c in coins:
-                    if c.market_cap and c.price_change_percentage_24h:
-                        weight = c.market_cap / total_mcap
-                        weighted_change += c.price_change_percentage_24h * weight
-
-            return {
-                'total_market_cap': total_mcap,
-                'total_volume': total_vol,
-                'btc_dominance': btc_dom,
-                'eth_dominance': eth_dom,
-                'active_cryptocurrencies': len(coins),
-                'market_cap_change_24h': weighted_change,
-            }
-        except Exception as e:
-            print(f"DB calculation error: {e}")
-            return self._empty_summary()
-
-    def _empty_summary(self):
+    def get_market_summary(self):
+        """Piyasa özeti - kendi veritabanımızdan hesaplar (rate limit yemez)"""
+        # Bu fonksiyon artık app.py içinde hesaplanıyor
+        # Yedek olarak boş değer döndürür
         return {
             'total_market_cap': 0,
             'total_volume': 0,
