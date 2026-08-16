@@ -31,7 +31,7 @@ def setup_scheduler(app):
     def daily_summary_job():
         try:
             coins_data = price_tracker.fetch_prices()
-            global_data = price_tracker.get_market_summary()
+            global_data = price_tracker.get_market_summary(app)
             market_summary_gen.generate_daily_summary(coins_data, global_data, app)
             print("📊 Daily market summary generated")
         except Exception as e:

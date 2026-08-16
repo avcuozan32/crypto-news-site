@@ -101,10 +101,10 @@ def category(category):
     )
 
 @app.route('/market')
-@cache.cached(timeout=60)
+@cache.cached(timeout=120)
 def market():
     coins = CoinPrice.query.order_by(CoinPrice.market_cap_rank).all()
-    summary = tracker.get_market_summary()
+    summary = tracker.get_market_summary(app)
     trending = tracker.fetch_trending()
     return render_template('market.html', coins=coins, summary=summary, trending=trending)
 
